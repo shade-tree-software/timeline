@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Timeline</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin="">
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; width: 100%; }
+    #controls {
+      position: absolute; top: 10px; left: 60px; z-index: 1000;
+      background: white; padding: 8px 10px; border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+      font: 13px system-ui, sans-serif;
+    }
+    #controls label { margin-right: 6px; }
+    #controls input { margin-right: 10px; }
+    #status { margin-left: 8px; color: #555; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <label>From <input type="datetime-local" id="from"></label>
+    <label>To <input type="datetime-local" id="to"></label>
+    <button id="load">Load</button>
+    <span id="status"></span>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+          crossorigin=""></script>
+  <script>
+    const map = L.map('map').setView([0, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let layer = L.layerGroup().addTo(map);
+    const statusEl = document.getElementById('status');
+
+    function toEpoch(value) {
+      if (!value) return null;
+      const d = new Date(value);
+      return isNaN(d) ? null : Math.floor(d.getTime() / 1000);
+    }
+
+    async function load() {
+      const params = new URLSearchParams();
+      const f = toEpoch(document.getElementById('from').value);
+      const t = toEpoch(document.getElementById('to').value);
+      if (f !== null) params.set('from', f);
+      if (t !== null) params.set('to', t);
+
+      statusEl.textContent = 'Loading…';
+      const res = await fetch('/api/points?' + params.toString());
+      if (!res.ok) {
+        statusEl.textContent = 'Error: ' + res.status;
+        return;
+      }
+      const geo = await res.json();
+
+      layer.clearLayers();
+      const coords = geo.features.map(f => {
+        const [lon, lat] = f.geometry.coordinates;
+        return [lat, lon];
+      });
+
+      if (coords.length === 0) {
+        statusEl.textContent = 'No points';
+        return;
+      }
+
+      L.polyline(coords, { color: 'steelblue', weight: 3 }).addTo(layer);
+      geo.features.forEach(f => {
+        const [lon, lat] = f.geometry.coordinates;
+        const p = f.properties;
+        const ts = new Date(p.tst * 1000).toISOString();
+        L.circleMarker([lat, lon], { radius: 4, color: 'steelblue' })
+         .bindPopup(`${ts}<br>acc: ${p.acc ?? '?'} m<br>vel: ${p.vel ?? '?'} km/h`)
+         .addTo(layer);
+      });
+
+      map.fitBounds(L.latLngBounds(coords), { padding: [20, 20] });
+      statusEl.textContent = `${coords.length} points`;
+    }
+
+    document.getElementById('load').addEventListener('click', load);
+    load();
+  </script>
+</body>
+</html>

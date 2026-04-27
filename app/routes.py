@@ -2,12 +2,29 @@ import base64
 import hmac
 import json
 import time
+from datetime import datetime, timezone
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, render_template, request
 
 from .db import get_db
 
 bp = Blueprint("main", __name__)
+
+
+def _parse_ts(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
 
 
 def _check_auth() -> bool:
@@ -78,6 +95,54 @@ def pub() -> Response:
         _store_location(payload)
 
     return jsonify([])
+
+
+@bp.get("/api/points")
+def points() -> Response:
+    frm = _parse_ts(request.args.get("from"))
+    to = _parse_ts(request.args.get("to"))
+
+    sql = "SELECT tst, tid, lat, lon, acc, alt, vel, cog, batt FROM locations"
+    clauses: list[str] = []
+    params: list[int] = []
+    if frm is not None:
+        clauses.append("tst >= ?")
+        params.append(frm)
+    if to is not None:
+        clauses.append("tst <= ?")
+        params.append(to)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY tst ASC"
+
+    rows = get_db().execute(sql, params).fetchall()
+
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [row["lon"], row["lat"]],
+            },
+            "properties": {
+                "tst": row["tst"],
+                "tid": row["tid"],
+                "acc": row["acc"],
+                "alt": row["alt"],
+                "vel": row["vel"],
+                "cog": row["cog"],
+                "batt": row["batt"],
+            },
+        }
+        for row in rows
+    ]
+
+    return jsonify({"type": "FeatureCollection", "features": features})
+
+
+@bp.get("/")
+def map_page() -> Response:
+    return render_template("map.html")
 
 
 @bp.get("/healthz")

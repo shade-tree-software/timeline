@@ -25,7 +25,7 @@ Single Flask app (`app/__init__.py::create_app`) that does two things behind HTT
 
 ### Storage
 
-SQLite at `Config.DB_PATH` (env `LOC_DB_PATH`, default `<repo>/loc.sqlite3`). Note the committed `timeline.sqlite` is **not** the runtime path — set `LOC_DB_PATH` if you want to point at it. `app/db.py::init_db` runs `schema.sql` on every `create_app()`; the schema uses `IF NOT EXISTS`, so this is the migration story — edit `schema.sql` for additive changes, write a one-off script for anything destructive. WAL is enabled per-connection.
+SQLite at `Config.DB_PATH` (env `TIMELINE_DB_PATH`).  `app/db.py::init_db` runs `schema.sql` on every `create_app()`; the schema uses `IF NOT EXISTS`, so this is the migration story — edit `schema.sql` for additive changes, write a one-off script for anything destructive. WAL is enabled per-connection.
 
 The `locations` table mirrors OwnTracks field names (`tst`, `tid`, `acc`, `alt`, `vel`, `cog`, `batt`, `bs`, `conn`, `trigger`) plus `raw` (full JSON) and `received_at` (server clock). Indexed on `tst` and `(tid, tst)`.
 

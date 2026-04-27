@@ -77,12 +77,20 @@
       }
 
       L.polyline(coords, { color: 'steelblue', weight: 3 }).addTo(layer);
+      const tsFmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        timeZoneName: 'short',
+      });
       geo.features.forEach(f => {
         const [lon, lat] = f.geometry.coordinates;
         const p = f.properties;
-        const ts = new Date(p.tst * 1000).toISOString();
+        const ts = tsFmt.format(new Date(p.tst * 1000));
+        const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
+        const velMph = p.vel == null ? '?' : Math.round(p.vel * 0.621371);
         L.circleMarker([lat, lon], { radius: 4, color: 'steelblue' })
-         .bindPopup(`${ts}<br>acc: ${p.acc ?? '?'} m<br>vel: ${p.vel ?? '?'} km/h`)
+         .bindPopup(`${ts}<br>acc: ${accFt} ft<br>vel: ${velMph} mph`)
          .addTo(layer);
       });
 

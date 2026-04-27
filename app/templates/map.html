@@ -19,13 +19,16 @@
     }
     #controls label { margin-right: 6px; }
     #controls input { margin-right: 10px; }
+    #controls button.nav { font-size: 14px; padding: 2px 8px; margin-right: 6px; cursor: pointer; }
     #status { margin-left: 8px; color: #555; }
   </style>
 </head>
 <body>
   <div id="controls">
+    <button id="prevDay" class="nav" title="Previous day">&#9664;</button>
     <label>From <input type="datetime-local" id="from"></label>
     <label>To <input type="datetime-local" id="to"></label>
+    <button id="nextDay" class="nav" title="Next day">&#9654;</button>
     <button id="load">Load</button>
     <span id="status"></span>
   </div>
@@ -44,10 +47,50 @@
     let layer = L.layerGroup().addTo(map);
     const statusEl = document.getElementById('status');
 
+    function etOffsetForDate(dateStr) {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const noonUtc = new Date(Date.UTC(y, m - 1, d, 12));
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        timeZoneName: 'longOffset',
+      }).formatToParts(noonUtc);
+      const tzn = parts.find(p => p.type === 'timeZoneName').value;
+      return tzn.replace('GMT', '') || '+00:00';
+    }
+
     function toEpoch(value) {
       if (!value) return null;
-      const d = new Date(value);
+      const dateStr = value.slice(0, 10);
+      const d = new Date(`${value}:00${etOffsetForDate(dateStr)}`);
       return isNaN(d) ? null : Math.floor(d.getTime() / 1000);
+    }
+
+    function todayInET() {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/New_York',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date());
+      const get = t => parts.find(p => p.type === t).value;
+      return `${get('year')}-${get('month')}-${get('day')}`;
+    }
+
+    function shiftDate(dateStr, days) {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      dt.setUTCDate(dt.getUTCDate() + days);
+      const yy = dt.getUTCFullYear();
+      const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getUTCDate()).padStart(2, '0');
+      return `${yy}-${mm}-${dd}`;
+    }
+
+    function shiftPickers(days) {
+      for (const id of ['from', 'to']) {
+        const el = document.getElementById(id);
+        if (!el.value) continue;
+        const [datePart, timePart] = el.value.split('T');
+        el.value = `${shiftDate(datePart, days)}T${timePart}`;
+      }
     }
 
     async function load() {
@@ -99,6 +142,12 @@
     }
 
     document.getElementById('load').addEventListener('click', load);
+    document.getElementById('prevDay').addEventListener('click', () => { shiftPickers(-1); load(); });
+    document.getElementById('nextDay').addEventListener('click', () => { shiftPickers(1); load(); });
+
+    const today = todayInET();
+    document.getElementById('from').value = `${today}T00:00`;
+    document.getElementById('to').value = `${today}T23:59`;
     load();
   </script>
 </body>

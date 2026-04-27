@@ -27,8 +27,7 @@ def _parse_ts(value: str | None) -> int | None:
     return int(dt.timestamp())
 
 
-def _check_auth() -> bool:
-    expected_pw = current_app.config.get("OWNTRACKS_PASSWORD")
+def _check_basic_auth(expected_user: str, expected_pw: str | None) -> bool:
     if not expected_pw:
         return False
 
@@ -42,10 +41,23 @@ def _check_auth() -> bool:
     except (ValueError, UnicodeDecodeError):
         return False
 
-    expected_user = current_app.config["OWNTRACKS_USERNAME"]
     return hmac.compare_digest(user, expected_user) and hmac.compare_digest(
         password, expected_pw
     )
+
+
+def _unauthorized(realm: str) -> Response:
+    resp = jsonify(error="unauthorized")
+    resp.status_code = 401
+    resp.headers["WWW-Authenticate"] = f'Basic realm="{realm}"'
+    return resp
+
+
+def _require_viewer() -> Response | None:
+    cfg = current_app.config
+    if _check_basic_auth(cfg["VIEWER_USERNAME"], cfg.get("VIEWER_PASSWORD")):
+        return None
+    return _unauthorized("timeline")
 
 
 def _store_location(payload: dict) -> None:
@@ -79,11 +91,9 @@ def _store_location(payload: dict) -> None:
 
 @bp.post("/pub")
 def pub() -> Response:
-    if not _check_auth():
-        resp = jsonify(error="unauthorized")
-        resp.status_code = 401
-        resp.headers["WWW-Authenticate"] = 'Basic realm="owntracks"'
-        return resp
+    cfg = current_app.config
+    if not _check_basic_auth(cfg["OWNTRACKS_USERNAME"], cfg.get("OWNTRACKS_PASSWORD")):
+        return _unauthorized("owntracks")
 
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -99,6 +109,9 @@ def pub() -> Response:
 
 @bp.get("/api/points")
 def points() -> Response:
+    if (deny := _require_viewer()) is not None:
+        return deny
+
     frm = _parse_ts(request.args.get("from"))
     to = _parse_ts(request.args.get("to"))
 
@@ -142,6 +155,8 @@ def points() -> Response:
 
 @bp.get("/")
 def map_page() -> Response:
+    if (deny := _require_viewer()) is not None:
+        return deny
     return render_template("map.html")
 
 

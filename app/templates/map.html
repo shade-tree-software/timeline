@@ -13,24 +13,69 @@
     #map { height: 100%; width: 100%; }
     #controls {
       position: absolute; top: 10px; left: 60px; z-index: 1000;
-      background: white; padding: 8px 10px; border-radius: 4px;
+      background: white; border-radius: 8px;
       box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-      font: 13px system-ui, sans-serif;
+      font: 14px system-ui, sans-serif;
+      max-width: calc(100vw - 120px);
+      box-sizing: border-box;
     }
-    #controls label { margin-right: 6px; }
-    #controls input { margin-right: 10px; }
-    #controls button.nav { font-size: 14px; padding: 2px 8px; margin-right: 6px; cursor: pointer; }
-    #status { margin-left: 8px; color: #555; }
+    #dayBar { display: flex; align-items: center; }
+    #dayBar button {
+      border: none; background: transparent; cursor: pointer;
+      font-size: 14px; padding: 8px 10px; color: #333; line-height: 1;
+      border-radius: 6px;
+    }
+    #dayBar button:hover { background: #f0f0f0; }
+    #dayBar button:disabled { color: #ccc; cursor: default; background: transparent; }
+    #dayLabel {
+      flex: 1; text-align: center; font-weight: 500;
+      padding: 8px 4px; min-width: 140px; user-select: none;
+      white-space: nowrap;
+    }
+    #toggleCustom .chev { display: inline-block; transition: transform 0.15s; }
+    #controls.custom-open #toggleCustom .chev { transform: rotate(180deg); }
+    #customRange { display: none; padding: 8px 12px 10px; border-top: 1px solid #eee; }
+    #controls.custom-open #customRange { display: block; }
+    #customRange label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    #customRange label span { width: 38px; color: #555; font-size: 13px; }
+    #customRange input {
+      flex: 1; min-width: 0; padding: 4px 6px;
+      font: inherit; box-sizing: border-box;
+    }
+    #customRange .actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+    #customRange .actions button {
+      border: 1px solid #ccc; background: white; padding: 4px 12px;
+      border-radius: 4px; cursor: pointer; font: inherit;
+    }
+    #customRange .actions button.primary {
+      background: steelblue; color: white; border-color: steelblue;
+    }
+    #status { padding: 4px 12px 8px; color: #555; font-size: 12px; }
+    #status:empty { display: none; }
+    @media (max-width: 480px) {
+      #controls { left: 50px; max-width: calc(100vw - 100px); }
+      #dayLabel { min-width: 110px; font-size: 13px; }
+    }
   </style>
 </head>
 <body>
   <div id="controls">
-    <button id="prevDay" class="nav" title="Previous day">&#9664;</button>
-    <label>From <input type="datetime-local" id="from"></label>
-    <label>To <input type="datetime-local" id="to"></label>
-    <button id="nextDay" class="nav" title="Next day">&#9654;</button>
-    <button id="load">Load</button>
-    <span id="status"></span>
+    <div id="dayBar">
+      <button id="prevDay" title="Previous day" aria-label="Previous day">&#9664;</button>
+      <span id="dayLabel">Today</span>
+      <button id="nextDay" title="Next day" aria-label="Next day">&#9654;</button>
+      <button id="toggleCustom" title="Custom range" aria-label="Toggle custom range" aria-expanded="false">
+        <span class="chev">&#9662;</span>
+      </button>
+    </div>
+    <div id="customRange">
+      <label><span>From</span><input type="datetime-local" id="from"></label>
+      <label><span>To</span><input type="datetime-local" id="to"></label>
+      <div class="actions">
+        <button id="applyCustom" class="primary">Apply</button>
+      </div>
+    </div>
+    <div id="status"></div>
   </div>
   <div id="map"></div>
 
@@ -54,6 +99,19 @@
 
     let layer = L.layerGroup().addTo(map);
     const statusEl = document.getElementById('status');
+    const controlsEl = document.getElementById('controls');
+    const dayLabelEl = document.getElementById('dayLabel');
+    const prevBtn = document.getElementById('prevDay');
+    const nextBtn = document.getElementById('nextDay');
+    const toggleBtn = document.getElementById('toggleCustom');
+    const fromEl = document.getElementById('from');
+    const toEl = document.getElementById('to');
+
+    L.DomEvent.disableClickPropagation(controlsEl);
+    L.DomEvent.disableScrollPropagation(controlsEl);
+
+    let mode = 'day';   // 'day' | 'custom'
+    let currentDay;     // YYYY-MM-DD (Eastern time) when mode === 'day'
 
     function etOffsetForDate(dateStr) {
       const [y, m, d] = dateStr.split('-').map(Number);
@@ -64,13 +122,6 @@
       }).formatToParts(noonUtc);
       const tzn = parts.find(p => p.type === 'timeZoneName').value;
       return tzn.replace('GMT', '') || '+00:00';
-    }
-
-    function toEpoch(value) {
-      if (!value) return null;
-      const dateStr = value.slice(0, 10);
-      const d = new Date(`${value}:00${etOffsetForDate(dateStr)}`);
-      return isNaN(d) ? null : Math.floor(d.getTime() / 1000);
     }
 
     function todayInET() {
@@ -92,19 +143,60 @@
       return `${yy}-${mm}-${dd}`;
     }
 
-    function shiftPickers(days) {
-      for (const id of ['from', 'to']) {
-        const el = document.getElementById(id);
-        if (!el.value) continue;
-        const [datePart, timePart] = el.value.split('T');
-        el.value = `${shiftDate(datePart, days)}T${timePart}`;
-      }
+    function dayLabelText(dateStr) {
+      const today = todayInET();
+      if (dateStr === today) return 'Today';
+      if (dateStr === shiftDate(today, -1)) return 'Yesterday';
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d, 12));
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        weekday: 'long', month: 'short', day: 'numeric',
+      }).format(dt);
+    }
+
+    function dayBoundsEpoch(dateStr) {
+      const offset = etOffsetForDate(dateStr);
+      const start = new Date(`${dateStr}T00:00:00${offset}`);
+      const end = new Date(`${dateStr}T23:59:59${offset}`);
+      return [Math.floor(start.getTime() / 1000), Math.floor(end.getTime() / 1000)];
+    }
+
+    function toEpoch(value) {
+      if (!value) return null;
+      const dateStr = value.slice(0, 10);
+      const d = new Date(`${value}:00${etOffsetForDate(dateStr)}`);
+      return isNaN(d) ? null : Math.floor(d.getTime() / 1000);
+    }
+
+    function setDay(dateStr) {
+      mode = 'day';
+      currentDay = dateStr;
+      dayLabelEl.textContent = dayLabelText(dateStr);
+      prevBtn.disabled = false;
+      nextBtn.disabled = false;
+      controlsEl.classList.remove('custom-open');
+      toggleBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    function setCustom() {
+      mode = 'custom';
+      dayLabelEl.textContent = 'Custom range';
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
+      controlsEl.classList.add('custom-open');
+      toggleBtn.setAttribute('aria-expanded', 'true');
     }
 
     async function load() {
       const params = new URLSearchParams();
-      const f = toEpoch(document.getElementById('from').value);
-      const t = toEpoch(document.getElementById('to').value);
+      let f, t;
+      if (mode === 'day') {
+        [f, t] = dayBoundsEpoch(currentDay);
+      } else {
+        f = toEpoch(fromEl.value);
+        t = toEpoch(toEl.value);
+      }
       if (f !== null) params.set('from', f);
       if (t !== null) params.set('to', t);
 
@@ -149,13 +241,32 @@
       statusEl.textContent = `${coords.length} points`;
     }
 
-    document.getElementById('load').addEventListener('click', load);
-    document.getElementById('prevDay').addEventListener('click', () => { shiftPickers(-1); load(); });
-    document.getElementById('nextDay').addEventListener('click', () => { shiftPickers(1); load(); });
+    prevBtn.addEventListener('click', () => {
+      if (mode !== 'day') return;
+      setDay(shiftDate(currentDay, -1));
+      load();
+    });
+    nextBtn.addEventListener('click', () => {
+      if (mode !== 'day') return;
+      setDay(shiftDate(currentDay, 1));
+      load();
+    });
+    toggleBtn.addEventListener('click', () => {
+      if (mode === 'day') {
+        fromEl.value = `${currentDay}T00:00`;
+        toEl.value = `${currentDay}T23:59`;
+        setCustom();
+      } else {
+        setDay(currentDay || todayInET());
+      }
+      load();
+    });
+    document.getElementById('applyCustom').addEventListener('click', () => {
+      if (mode !== 'custom') setCustom();
+      load();
+    });
 
-    const today = todayInET();
-    document.getElementById('from').value = `${today}T00:00`;
-    document.getElementById('to').value = `${today}T23:59`;
+    setDay(todayInET());
     load();
   </script>
 </body>

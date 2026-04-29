@@ -160,14 +160,15 @@ def latest() -> Response:
 
     rows = get_db().execute(
         """
-        SELECT l.tst, l.tid, l.lat, l.lon, l.acc, l.alt, l.vel, l.cog, l.batt
-        FROM locations l
-        JOIN (
-            SELECT tid, MAX(tst) AS max_tst
+        SELECT tst, tid, lat, lon, acc, alt, vel, cog, batt
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY tid ORDER BY tst DESC, rowid DESC
+            ) AS rn
             FROM locations
             WHERE tid IS NOT NULL
-            GROUP BY tid
-        ) m ON l.tid = m.tid AND l.tst = m.max_tst
+        )
+        WHERE rn = 1
         """
     ).fetchall()
 

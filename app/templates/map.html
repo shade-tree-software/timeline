@@ -29,12 +29,13 @@
     #dayBar button:disabled { color: #ccc; cursor: default; background: transparent; }
     #dateGroup {
       flex: 1; display: flex; align-items: center; justify-content: center;
-      min-width: 0;
+      min-width: 175px;
     }
     #dayLabel {
       font-weight: 500; padding: 8px 0 8px 4px; user-select: none;
-      white-space: nowrap; min-width: 175px; text-align: center;
+      white-space: nowrap; cursor: pointer;
     }
+    #dayLabel:hover { color: #000; }
     #toggleCustom { padding: 8px 6px; }
     #toggleCustom .chev {
       display: inline-block; transition: transform 0.15s;
@@ -61,7 +62,8 @@
     #status:empty { display: none; }
     @media (max-width: 480px) {
       #controls { left: 50px; max-width: calc(100vw - 100px); }
-      #dayLabel { font-size: 13px; min-width: 150px; }
+      #dateGroup { min-width: 150px; }
+      #dayLabel { font-size: 13px; }
       #toggleCustom .chev { font-size: 20px; }
     }
   </style>
@@ -261,7 +263,7 @@
       setDay(shiftDate(currentDay, 1));
       load();
     });
-    toggleBtn.addEventListener('click', () => {
+    function toggleCustomMode() {
       if (mode === 'day') {
         fromEl.value = `${currentDay}T00:00`;
         toEl.value = `${currentDay}T23:59`;
@@ -270,7 +272,9 @@
         setDay(currentDay || todayInET());
       }
       load();
-    });
+    }
+    toggleBtn.addEventListener('click', toggleCustomMode);
+    dayLabelEl.addEventListener('click', toggleCustomMode);
     document.getElementById('applyCustom').addEventListener('click', () => {
       if (mode !== 'custom') setCustom();
       load();

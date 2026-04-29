@@ -27,12 +27,19 @@
     }
     #dayBar button:hover { background: #f0f0f0; }
     #dayBar button:disabled { color: #ccc; cursor: default; background: transparent; }
+    #dateGroup {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      min-width: 0;
+    }
     #dayLabel {
-      flex: 1; text-align: center; font-weight: 500;
-      padding: 8px 4px; min-width: 140px; user-select: none;
+      font-weight: 500; padding: 8px 0 8px 4px; user-select: none;
       white-space: nowrap;
     }
-    #toggleCustom .chev { display: inline-block; transition: transform 0.15s; }
+    #toggleCustom { padding: 8px 6px; }
+    #toggleCustom .chev {
+      display: inline-block; transition: transform 0.15s;
+      font-size: 16px; line-height: 1;
+    }
     #controls.custom-open #toggleCustom .chev { transform: rotate(180deg); }
     #customRange { display: none; padding: 8px 12px 10px; border-top: 1px solid #eee; }
     #controls.custom-open #customRange { display: block; }
@@ -54,7 +61,8 @@
     #status:empty { display: none; }
     @media (max-width: 480px) {
       #controls { left: 50px; max-width: calc(100vw - 100px); }
-      #dayLabel { min-width: 110px; font-size: 13px; }
+      #dayLabel { font-size: 13px; }
+      #toggleCustom .chev { font-size: 20px; }
     }
   </style>
 </head>
@@ -62,11 +70,13 @@
   <div id="controls">
     <div id="dayBar">
       <button id="prevDay" title="Previous day" aria-label="Previous day">&#9664;</button>
-      <span id="dayLabel">Today</span>
+      <div id="dateGroup">
+        <span id="dayLabel">Today</span>
+        <button id="toggleCustom" title="Custom range" aria-label="Toggle custom range" aria-expanded="false">
+          <span class="chev">&#9660;</span>
+        </button>
+      </div>
       <button id="nextDay" title="Next day" aria-label="Next day">&#9654;</button>
-      <button id="toggleCustom" title="Custom range" aria-label="Toggle custom range" aria-expanded="false">
-        <span class="chev">&#9662;</span>
-      </button>
     </div>
     <div id="customRange">
       <label><span>From</span><input type="datetime-local" id="from"></label>

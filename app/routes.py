@@ -153,6 +153,47 @@ def points() -> Response:
     return jsonify({"type": "FeatureCollection", "features": features})
 
 
+@bp.get("/api/latest")
+def latest() -> Response:
+    if (deny := _require_viewer()) is not None:
+        return deny
+
+    rows = get_db().execute(
+        """
+        SELECT l.tst, l.tid, l.lat, l.lon, l.acc, l.alt, l.vel, l.cog, l.batt
+        FROM locations l
+        JOIN (
+            SELECT tid, MAX(tst) AS max_tst
+            FROM locations
+            WHERE tid IS NOT NULL
+            GROUP BY tid
+        ) m ON l.tid = m.tid AND l.tst = m.max_tst
+        """
+    ).fetchall()
+
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [row["lon"], row["lat"]],
+            },
+            "properties": {
+                "tst": row["tst"],
+                "tid": row["tid"],
+                "acc": row["acc"],
+                "alt": row["alt"],
+                "vel": row["vel"],
+                "cog": row["cog"],
+                "batt": row["batt"],
+            },
+        }
+        for row in rows
+    ]
+
+    return jsonify({"type": "FeatureCollection", "features": features})
+
+
 @bp.get("/")
 def map_page() -> Response:
     if (deny := _require_viewer()) is not None:

@@ -19,6 +19,24 @@
       max-width: calc(100vw - 120px);
       box-sizing: border-box;
     }
+    #modeTabs { display: flex; padding: 4px; gap: 2px; border-bottom: 1px solid #eee; }
+    #modeTabs button {
+      flex: 1; border: none; background: transparent; cursor: pointer;
+      padding: 6px 12px; border-radius: 4px; font: inherit; color: #555;
+    }
+    #modeTabs button:hover { background: #f0f0f0; }
+    #modeTabs button.active { background: steelblue; color: white; }
+    #modeTabs button.active:hover { background: steelblue; }
+    #liveBar { display: none; align-items: center; padding: 8px 12px; gap: 8px; }
+    #liveBar #liveCount { flex: 1; font-weight: 500; white-space: nowrap; }
+    #liveBar button {
+      border: none; background: transparent; cursor: pointer;
+      font-size: 16px; padding: 4px 8px; color: #333; border-radius: 6px;
+    }
+    #liveBar button:hover { background: #f0f0f0; }
+    #controls.live #dayBar,
+    #controls.live #customRange { display: none; }
+    #controls.live #liveBar { display: flex; }
     #dayBar { display: flex; align-items: center; }
     #dayBar button {
       border: none; background: transparent; cursor: pointer;
@@ -70,6 +88,14 @@
 </head>
 <body>
   <div id="controls">
+    <div id="modeTabs">
+      <button id="tabHistory" type="button">History</button>
+      <button id="tabLive" type="button">Live</button>
+    </div>
+    <div id="liveBar">
+      <span id="liveCount">No phones</span>
+      <button id="refreshLive" title="Refresh" aria-label="Refresh">&#x21bb;</button>
+    </div>
     <div id="dayBar">
       <button id="prevDay" title="Previous day" aria-label="Previous day">&#9664;</button>
       <div id="dateGroup">
@@ -118,12 +144,30 @@
     const toggleBtn = document.getElementById('toggleCustom');
     const fromEl = document.getElementById('from');
     const toEl = document.getElementById('to');
+    const tabHistoryBtn = document.getElementById('tabHistory');
+    const tabLiveBtn = document.getElementById('tabLive');
+    const liveCountEl = document.getElementById('liveCount');
+    const refreshLiveBtn = document.getElementById('refreshLive');
 
     L.DomEvent.disableClickPropagation(controlsEl);
     L.DomEvent.disableScrollPropagation(controlsEl);
 
-    let mode = 'day';   // 'day' | 'custom'
-    let currentDay;     // YYYY-MM-DD (Eastern time) when mode === 'day'
+    let viewMode = 'history';  // 'history' | 'live'
+    let mode = 'day';          // 'day' | 'custom'  (only meaningful when viewMode === 'history')
+    let currentDay;            // YYYY-MM-DD (Eastern time) when mode === 'day'
+
+    const tsFmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric', month: 'short', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      timeZoneName: 'short',
+    });
+
+    function colorForTid(tid) {
+      let h = 0;
+      for (const c of tid || '?') h = (h * 31 + c.charCodeAt(0)) >>> 0;
+      return `hsl(${h % 360}, 70%, 42%)`;
+    }
 
     function etOffsetForDate(dateStr) {
       const [y, m, d] = dateStr.split('-').map(Number);
@@ -200,7 +244,7 @@
       toggleBtn.setAttribute('aria-expanded', 'true');
     }
 
-    async function load() {
+    async function loadHistory() {
       const params = new URLSearchParams();
       let f, t;
       if (mode === 'day') {
@@ -232,12 +276,6 @@
       }
 
       L.polyline(coords, { color: 'steelblue', weight: 3 }).addTo(layer);
-      const tsFmt = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York',
-        year: 'numeric', month: 'short', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-        timeZoneName: 'short',
-      });
       geo.features.forEach(f => {
         const [lon, lat] = f.geometry.coordinates;
         const p = f.properties;
@@ -251,6 +289,62 @@
 
       map.fitBounds(L.latLngBounds(coords), { padding: [20, 20] });
       statusEl.textContent = `${coords.length} points`;
+    }
+
+    async function loadLive() {
+      statusEl.textContent = 'Loading…';
+      const res = await fetch('/api/latest');
+      if (!res.ok) {
+        statusEl.textContent = 'Error: ' + res.status;
+        return;
+      }
+      const geo = await res.json();
+
+      layer.clearLayers();
+      const n = geo.features.length;
+      liveCountEl.textContent = n === 0 ? 'No phones' : `${n} phone${n === 1 ? '' : 's'}`;
+      if (n === 0) {
+        statusEl.textContent = '';
+        return;
+      }
+
+      const coords = [];
+      geo.features.forEach(f => {
+        const [lon, lat] = f.geometry.coordinates;
+        const p = f.properties;
+        const tid = p.tid || '?';
+        const color = colorForTid(tid);
+        const ts = tsFmt.format(new Date(p.tst * 1000));
+        const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
+        const battStr = p.batt == null ? '?' : `${p.batt}%`;
+        L.circleMarker([lat, lon], {
+          radius: 8, color, fillColor: color, fillOpacity: 0.85, weight: 2,
+        })
+         .bindTooltip(tid, { permanent: true, direction: 'right', offset: [8, 0], className: 'tid-label' })
+         .bindPopup(`<b>${tid}</b><br>${ts}<br>acc: ${accFt} ft<br>batt: ${battStr}`)
+         .addTo(layer);
+        coords.push([lat, lon]);
+      });
+
+      if (coords.length === 1) {
+        map.setView(coords[0], Math.max(map.getZoom(), 13));
+      } else {
+        map.fitBounds(L.latLngBounds(coords), { padding: [40, 40] });
+      }
+      statusEl.textContent = '';
+    }
+
+    function load() {
+      return viewMode === 'live' ? loadLive() : loadHistory();
+    }
+
+    function setViewMode(next) {
+      if (next === viewMode) return;
+      viewMode = next;
+      controlsEl.classList.toggle('live', next === 'live');
+      tabHistoryBtn.classList.toggle('active', next === 'history');
+      tabLiveBtn.classList.toggle('active', next === 'live');
+      load();
     }
 
     prevBtn.addEventListener('click', () => {
@@ -279,8 +373,12 @@
       if (mode !== 'custom') setCustom();
       load();
     });
+    tabHistoryBtn.addEventListener('click', () => setViewMode('history'));
+    tabLiveBtn.addEventListener('click', () => setViewMode('live'));
+    refreshLiveBtn.addEventListener('click', () => loadLive());
 
     setDay(todayInET());
+    tabHistoryBtn.classList.add('active');
     load();
   </script>
 </body>

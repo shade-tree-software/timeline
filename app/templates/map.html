@@ -33,7 +33,7 @@
     }
     #dayLabel {
       font-weight: 500; padding: 8px 0 8px 4px; user-select: none;
-      white-space: nowrap;
+      white-space: nowrap; min-width: 175px; text-align: center;
     }
     #toggleCustom { padding: 8px 6px; }
     #toggleCustom .chev {
@@ -61,7 +61,7 @@
     #status:empty { display: none; }
     @media (max-width: 480px) {
       #controls { left: 50px; max-width: calc(100vw - 100px); }
-      #dayLabel { font-size: 13px; }
+      #dayLabel { font-size: 13px; min-width: 150px; }
       #toggleCustom .chev { font-size: 20px; }
     }
   </style>

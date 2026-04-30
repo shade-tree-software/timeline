@@ -265,30 +265,40 @@
       const geo = await res.json();
 
       layer.clearLayers();
-      const coords = geo.features.map(f => {
-        const [lon, lat] = f.geometry.coordinates;
-        return [lat, lon];
-      });
 
-      if (coords.length === 0) {
+      if (geo.features.length === 0) {
         statusEl.textContent = 'No points';
         return;
       }
 
-      L.polyline(coords, { color: 'steelblue', weight: 3 }).addTo(layer);
+      const byTid = new Map();
+      const allCoords = [];
       geo.features.forEach(f => {
         const [lon, lat] = f.geometry.coordinates;
-        const p = f.properties;
-        const ts = tsFmt.format(new Date(p.tst * 1000));
-        const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
-        const velMph = p.vel == null ? '?' : Math.round(p.vel * 0.621371);
-        L.circleMarker([lat, lon], { radius: 4, color: 'steelblue' })
-         .bindPopup(`${ts}<br>acc: ${accFt} ft<br>vel: ${velMph} mph`)
-         .addTo(layer);
+        const tid = f.properties.tid || '?';
+        if (!byTid.has(tid)) byTid.set(tid, []);
+        byTid.get(tid).push({ lat, lon, p: f.properties });
+        allCoords.push([lat, lon]);
       });
 
-      map.fitBounds(L.latLngBounds(coords), { padding: [20, 20] });
-      statusEl.textContent = `${coords.length} points`;
+      byTid.forEach((points, tid) => {
+        const color = colorForTid(tid);
+        const coords = points.map(({ lat, lon }) => [lat, lon]);
+        if (coords.length > 1) {
+          L.polyline(coords, { color, weight: 3 }).addTo(layer);
+        }
+        points.forEach(({ lat, lon, p }) => {
+          const ts = tsFmt.format(new Date(p.tst * 1000));
+          const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
+          const velMph = p.vel == null ? '?' : Math.round(p.vel * 0.621371);
+          L.circleMarker([lat, lon], { radius: 4, color })
+           .bindPopup(`<b>${tid}</b><br>${ts}<br>acc: ${accFt} ft<br>vel: ${velMph} mph`)
+           .addTo(layer);
+        });
+      });
+
+      map.fitBounds(L.latLngBounds(allCoords), { padding: [20, 20] });
+      statusEl.textContent = `${allCoords.length} points`;
     }
 
     async function loadLive() {

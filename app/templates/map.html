@@ -244,7 +244,7 @@
       toggleBtn.setAttribute('aria-expanded', 'true');
     }
 
-    async function loadHistory() {
+    async function loadHistory({ fit = true } = {}) {
       const params = new URLSearchParams();
       let f, t;
       if (mode === 'day') {
@@ -256,7 +256,7 @@
       if (f !== null) params.set('from', f);
       if (t !== null) params.set('to', t);
 
-      statusEl.textContent = 'Loading…';
+      if (fit) statusEl.textContent = 'Loading…';
       const res = await fetch('/api/points?' + params.toString());
       if (!res.ok) {
         statusEl.textContent = 'Error: ' + res.status;
@@ -297,12 +297,12 @@
         });
       });
 
-      map.fitBounds(L.latLngBounds(allCoords), { padding: [20, 20] });
+      if (fit) map.fitBounds(L.latLngBounds(allCoords), { padding: [20, 20] });
       statusEl.textContent = `${allCoords.length} points`;
     }
 
-    async function loadLive() {
-      statusEl.textContent = 'Loading…';
+    async function loadLive({ fit = true } = {}) {
+      if (fit) statusEl.textContent = 'Loading…';
       const res = await fetch('/api/latest');
       if (!res.ok) {
         statusEl.textContent = 'Error: ' + res.status;
@@ -336,16 +336,40 @@
         coords.push([lat, lon]);
       });
 
-      if (coords.length === 1) {
-        map.setView(coords[0], Math.max(map.getZoom(), 13));
-      } else {
-        map.fitBounds(L.latLngBounds(coords), { padding: [40, 40] });
+      if (fit) {
+        if (coords.length === 1) {
+          map.setView(coords[0], Math.max(map.getZoom(), 13));
+        } else {
+          map.fitBounds(L.latLngBounds(coords), { padding: [40, 40] });
+        }
       }
       statusEl.textContent = '';
     }
 
-    function load() {
-      return viewMode === 'live' ? loadLive() : loadHistory();
+    function load(opts) {
+      return viewMode === 'live' ? loadLive(opts) : loadHistory(opts);
+    }
+
+    const REFRESH_MS = 15000;
+    let refreshTimer = null;
+    function shouldAutoRefresh() {
+      if (document.hidden) return false;
+      if (viewMode === 'live') return true;
+      // History mode: auto-refresh only when viewing today.
+      return mode === 'day' && currentDay === todayInET();
+    }
+    function tickRefresh() {
+      if (shouldAutoRefresh()) load({ fit: false });
+    }
+    function startAutoRefresh() {
+      stopAutoRefresh();
+      refreshTimer = setInterval(tickRefresh, REFRESH_MS);
+    }
+    function stopAutoRefresh() {
+      if (refreshTimer !== null) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
     }
 
     function setViewMode(next) {
@@ -404,14 +428,21 @@
       pageLoadDay = today;
     }
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) checkDateRollover();
+      if (!document.hidden) {
+        checkDateRollover();
+        tickRefresh();
+      }
     });
-    window.addEventListener('focus', checkDateRollover);
+    window.addEventListener('focus', () => {
+      checkDateRollover();
+      tickRefresh();
+    });
     setInterval(checkDateRollover, 60000);
 
     setDay(pageLoadDay);
     tabHistoryBtn.classList.add('active');
     load();
+    startAutoRefresh();
   </script>
 </body>
 </html>

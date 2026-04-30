@@ -387,7 +387,29 @@
     tabLiveBtn.addEventListener('click', () => setViewMode('live'));
     refreshLiveBtn.addEventListener('click', () => loadLive());
 
-    setDay(todayInET());
+    let pageLoadDay = todayInET();
+    function checkDateRollover() {
+      const today = todayInET();
+      if (today === pageLoadDay) return;
+      // ET date has rolled over since the page loaded.
+      if (viewMode === 'history' && mode === 'day' && currentDay === pageLoadDay) {
+        setDay(today);
+        load();
+      } else {
+        // Re-render the "Today"/"Yesterday" label for whatever day is shown.
+        if (viewMode === 'history' && mode === 'day') {
+          dayLabelEl.textContent = dayLabelText(currentDay);
+        }
+      }
+      pageLoadDay = today;
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) checkDateRollover();
+    });
+    window.addEventListener('focus', checkDateRollover);
+    setInterval(checkDateRollover, 60000);
+
+    setDay(pageLoadDay);
     tabHistoryBtn.classList.add('active');
     load();
   </script>

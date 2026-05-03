@@ -253,7 +253,7 @@
       toggleBtn.setAttribute('aria-expanded', 'true');
     }
 
-    async function loadHistory() {
+    async function loadHistory({ fit = true } = {}) {
       const params = new URLSearchParams();
       let f, t;
       if (mode === 'day') {
@@ -265,7 +265,7 @@
       if (f !== null) params.set('from', f);
       if (t !== null) params.set('to', t);
 
-      statusEl.textContent = 'Loading…';
+      if (fit) statusEl.textContent = 'Loading…';
       const res = await fetch('/api/points?' + params.toString());
       if (!res.ok) {
         statusEl.textContent = 'Error: ' + res.status;
@@ -274,34 +274,44 @@
       const geo = await res.json();
 
       layer.clearLayers();
-      const coords = geo.features.map(f => {
-        const [lon, lat] = f.geometry.coordinates;
-        return [lat, lon];
-      });
 
-      if (coords.length === 0) {
+      if (geo.features.length === 0) {
         statusEl.textContent = 'No points';
         return;
       }
 
-      L.polyline(coords, { color: 'steelblue', weight: 3 }).addTo(layer);
+      const byTid = new Map();
+      const allCoords = [];
       geo.features.forEach(f => {
         const [lon, lat] = f.geometry.coordinates;
-        const p = f.properties;
-        const ts = formatTsAt(p.tst, lat, lon);
-        const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
-        const velMph = p.vel == null ? '?' : Math.round(p.vel * 0.621371);
-        L.circleMarker([lat, lon], { radius: 4, color: 'steelblue' })
-         .bindPopup(`${ts}<br>acc: ${accFt} ft<br>vel: ${velMph} mph`)
-         .addTo(layer);
+        const tid = f.properties.tid || '?';
+        if (!byTid.has(tid)) byTid.set(tid, []);
+        byTid.get(tid).push({ lat, lon, p: f.properties });
+        allCoords.push([lat, lon]);
       });
 
-      map.fitBounds(L.latLngBounds(coords), { padding: [20, 20] });
-      statusEl.textContent = `${coords.length} points`;
+      byTid.forEach((points, tid) => {
+        const color = colorForTid(tid);
+        const coords = points.map(({ lat, lon }) => [lat, lon]);
+        if (coords.length > 1) {
+          L.polyline(coords, { color, weight: 3 }).addTo(layer);
+        }
+        points.forEach(({ lat, lon, p }) => {
+          const ts = formatTsAt(p.tst, lat, lon);
+          const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
+          const velMph = p.vel == null ? '?' : Math.round(p.vel * 0.621371);
+          L.circleMarker([lat, lon], { radius: 4, color })
+           .bindPopup(`<b>${tid}</b><br>${ts}<br>acc: ${accFt} ft<br>vel: ${velMph} mph`)
+           .addTo(layer);
+        });
+      });
+
+      if (fit) map.fitBounds(L.latLngBounds(allCoords), { padding: [20, 20] });
+      statusEl.textContent = `${allCoords.length} points`;
     }
 
-    async function loadLive() {
-      statusEl.textContent = 'Loading…';
+    async function loadLive({ fit = true } = {}) {
+      if (fit) statusEl.textContent = 'Loading…';
       const res = await fetch('/api/latest');
       if (!res.ok) {
         statusEl.textContent = 'Error: ' + res.status;
@@ -335,16 +345,40 @@
         coords.push([lat, lon]);
       });
 
-      if (coords.length === 1) {
-        map.setView(coords[0], Math.max(map.getZoom(), 13));
-      } else {
-        map.fitBounds(L.latLngBounds(coords), { padding: [40, 40] });
+      if (fit) {
+        if (coords.length === 1) {
+          map.setView(coords[0], Math.max(map.getZoom(), 13));
+        } else {
+          map.fitBounds(L.latLngBounds(coords), { padding: [40, 40] });
+        }
       }
       statusEl.textContent = '';
     }
 
-    function load() {
-      return viewMode === 'live' ? loadLive() : loadHistory();
+    function load(opts) {
+      return viewMode === 'live' ? loadLive(opts) : loadHistory(opts);
+    }
+
+    const REFRESH_MS = 15000;
+    let refreshTimer = null;
+    function shouldAutoRefresh() {
+      if (document.hidden) return false;
+      if (viewMode === 'live') return true;
+      // History mode: auto-refresh only when viewing today.
+      return mode === 'day' && currentDay === todayInET();
+    }
+    function tickRefresh() {
+      if (shouldAutoRefresh()) load({ fit: false });
+    }
+    function startAutoRefresh() {
+      stopAutoRefresh();
+      refreshTimer = setInterval(tickRefresh, REFRESH_MS);
+    }
+    function stopAutoRefresh() {
+      if (refreshTimer !== null) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
     }
 
     function setViewMode(next) {
@@ -386,9 +420,38 @@
     tabLiveBtn.addEventListener('click', () => setViewMode('live'));
     refreshLiveBtn.addEventListener('click', () => loadLive());
 
-    setDay(todayInET());
+    let pageLoadDay = todayInET();
+    function checkDateRollover() {
+      const today = todayInET();
+      if (today === pageLoadDay) return;
+      // ET date has rolled over since the page loaded.
+      if (viewMode === 'history' && mode === 'day' && currentDay === pageLoadDay) {
+        setDay(today);
+        load();
+      } else {
+        // Re-render the "Today"/"Yesterday" label for whatever day is shown.
+        if (viewMode === 'history' && mode === 'day') {
+          dayLabelEl.textContent = dayLabelText(currentDay);
+        }
+      }
+      pageLoadDay = today;
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        checkDateRollover();
+        tickRefresh();
+      }
+    });
+    window.addEventListener('focus', () => {
+      checkDateRollover();
+      tickRefresh();
+    });
+    setInterval(checkDateRollover, 60000);
+
+    setDay(pageLoadDay);
     tabHistoryBtn.classList.add('active');
     load();
+    startAutoRefresh();
   </script>
 </body>
 </html>

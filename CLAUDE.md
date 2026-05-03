@@ -20,6 +20,7 @@ Single Flask app (`app/__init__.py::create_app`) that does two things behind HTT
 
 1. **Ingest** — `POST /pub` accepts OwnTracks JSON pings (auth: `OWNTRACKS_USERNAME` / `OWNTRACKS_PASSWORD`). Only payloads with `_type == "location"` and both `lat`/`lon` are persisted; the entire payload is also stored verbatim in `locations.raw` so new fields can be backfilled later without changing the wire format. The endpoint always returns `[]` (OwnTracks expects a JSON array of friend locations).
 2. **View** — `GET /` renders `templates/map.html` (Leaflet + OSM tiles, no build step, CDN-loaded). The page calls `GET /api/points?from=&to=` which returns a GeoJSON `FeatureCollection`. Both endpoints require the `viewer` realm (`VIEWER_USERNAME` / `VIEWER_PASSWORD`).
+3. **External API** — `GET /api/v1/locations?tid=&from=&to=&limit=` returns a flat JSON array of `{tst, lat, lon}` for the given phone (`tid` required). Authenticated via `Authorization: Bearer <API_TOKEN>` (separate from the viewer/owntracks realms). `limit` defaults to `API_DEFAULT_LIMIT` (10000) and is capped at `API_MAX_LIMIT` (50000).
 
 `from`/`to` accept either Unix epoch seconds or ISO 8601 (`Z` suffix is normalized to `+00:00`); naive datetimes are treated as UTC. See `_parse_ts` in `app/routes.py`.
 

@@ -60,6 +60,29 @@ def _require_viewer() -> Response | None:
     return _unauthorized("timeline")
 
 
+def _require_api_token() -> Response | None:
+    expected = current_app.config.get("API_TOKEN")
+    if not expected:
+        resp = jsonify(error="unauthorized")
+        resp.status_code = 401
+        return resp
+
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        resp = jsonify(error="unauthorized")
+        resp.status_code = 401
+        resp.headers["WWW-Authenticate"] = 'Bearer realm="timeline-api"'
+        return resp
+
+    if not hmac.compare_digest(header[7:], expected):
+        resp = jsonify(error="unauthorized")
+        resp.status_code = 401
+        resp.headers["WWW-Authenticate"] = 'Bearer realm="timeline-api"'
+        return resp
+
+    return None
+
+
 def _store_location(payload: dict) -> None:
     db = get_db()
     db.execute(
@@ -193,6 +216,54 @@ def latest() -> Response:
     ]
 
     return jsonify({"type": "FeatureCollection", "features": features})
+
+
+@bp.get("/api/v1/locations")
+def api_locations() -> Response:
+    if (deny := _require_api_token()) is not None:
+        return deny
+
+    tid = request.args.get("tid")
+    if not tid:
+        return jsonify(error="missing tid"), 400
+
+    frm = _parse_ts(request.args.get("from"))
+    to = _parse_ts(request.args.get("to"))
+
+    cfg = current_app.config
+    max_limit = cfg["API_MAX_LIMIT"]
+    default_limit = cfg["API_DEFAULT_LIMIT"]
+    limit_arg = request.args.get("limit")
+    if limit_arg is None:
+        limit = default_limit
+    else:
+        try:
+            limit = int(limit_arg)
+        except ValueError:
+            return jsonify(error="invalid limit"), 400
+        if limit < 1:
+            return jsonify(error="invalid limit"), 400
+        limit = min(limit, max_limit)
+
+    sql = "SELECT tst, lat, lon FROM locations WHERE tid = ?"
+    params: list = [tid]
+    if frm is not None:
+        sql += " AND tst >= ?"
+        params.append(frm)
+    if to is not None:
+        sql += " AND tst <= ?"
+        params.append(to)
+    sql += " ORDER BY tst ASC LIMIT ?"
+    params.append(limit)
+
+    rows = get_db().execute(sql, params).fetchall()
+
+    return jsonify(
+        [
+            {"tst": row["tst"], "lat": row["lat"], "lon": row["lon"]}
+            for row in rows
+        ]
+    )
 
 
 @bp.get("/")

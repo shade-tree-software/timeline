@@ -259,41 +259,75 @@
       toggleBtn.setAttribute('aria-expanded', 'true');
     }
 
-    function renderHistoryPoint(lat, lon, p, tid, color, spuriousColor) {
-      const pointColor = p.spurious ? spuriousColor : color;
-      const ts = formatTsAt(p.tst, lat, lon);
-      const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
-      const velMph = p.vel == null ? '?' : Math.round(p.vel * 0.621371);
-      const marker = L.circleMarker([lat, lon], { radius: 4, color: pointColor })
-        .addTo(layer);
+    let pendingReload = null;
+    function scheduleReload() {
+      if (pendingReload !== null) clearTimeout(pendingReload);
+      pendingReload = setTimeout(() => {
+        pendingReload = null;
+        load({ fit: false });
+      }, 1500);
+    }
+
+    function renderHistoryGroup(lat, lon, group, tid, color, spuriousColor) {
+      const recolor = () => {
+        const allSpurious = group.every(({ p }) => p.spurious);
+        marker.setStyle({ color: allSpurious ? spuriousColor : color });
+      };
+      const marker = L.circleMarker([lat, lon], { radius: 4 }).addTo(layer);
       const buildPopup = () => {
         const div = document.createElement('div');
-        const label = p.spurious ? 'spurious' : '';
-        div.innerHTML =
-          `<b>${tid}</b>${label ? ` <span style="color:${spuriousColor}">(${label})</span>` : ''}` +
-          `<br>${ts}<br>acc: ${accFt} ft<br>vel: ${velMph} mph`;
-        const btn = document.createElement('button');
-        btn.className = 'spurious-toggle';
-        btn.textContent = p.spurious ? 'Unmark spurious' : 'Mark as spurious';
-        btn.addEventListener('click', async () => {
-          btn.disabled = true;
-          const res = await fetch(`/api/points/${p.id}/spurious`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ spurious: !p.spurious }),
+        const header = document.createElement('div');
+        const countLabel = group.length > 1 ? ` (${group.length} points)` : '';
+        header.innerHTML = `<b>${tid}</b>${countLabel}`;
+        div.appendChild(header);
+
+        group.forEach(({ p }) => {
+          const ts = formatTsAt(p.tst, lat, lon);
+          const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
+          const velMph = p.vel == null ? '?' : Math.round(p.vel * 0.621371);
+          const row = document.createElement('div');
+          row.style.borderTop = '1px solid #eee';
+          row.style.padding = '6px 0';
+          const label = p.spurious
+            ? ` <span style="color:${spuriousColor}">(spurious)</span>`
+            : '';
+          row.innerHTML = `${ts}${label}<br>acc: ${accFt} ft, vel: ${velMph} mph`;
+          const btn = document.createElement('button');
+          btn.className = 'spurious-toggle';
+          btn.textContent = p.spurious ? 'Unmark spurious' : 'Mark as spurious';
+          btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            const next = !p.spurious;
+            const res = await fetch(`/api/points/${p.id}/spurious`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ spurious: next }),
+            });
+            if (!res.ok) {
+              btn.disabled = false;
+              statusEl.textContent = 'Error: ' + res.status;
+              return;
+            }
+            p.spurious = next;
+            recolor();
+            marker.setPopupContent(buildPopup());
+            // Polyline needs a reload to redraw without/with this point;
+            // debounce so the user can mark several stacked points first.
+            scheduleReload();
           });
-          if (!res.ok) {
-            btn.disabled = false;
-            statusEl.textContent = 'Error: ' + res.status;
-            return;
-          }
-          load({ fit: false });
+          row.appendChild(document.createElement('br'));
+          row.appendChild(btn);
+          div.appendChild(row);
         });
-        div.appendChild(document.createElement('br'));
-        div.appendChild(btn);
         return div;
       };
       marker.bindPopup(buildPopup);
+      recolor();
+    }
+
+    function coordKey(lat, lon) {
+      // Group points within ~1m: 5 decimals of lat/lon.
+      return `${lat.toFixed(5)},${lon.toFixed(5)}`;
     }
 
     async function loadHistory({ fit = true } = {}) {
@@ -342,8 +376,15 @@
         if (lineCoords.length > 1) {
           L.polyline(lineCoords, { color, weight: 3 }).addTo(layer);
         }
-        points.forEach(({ lat, lon, p }) => {
-          renderHistoryPoint(lat, lon, p, tid, color, SPURIOUS_COLOR);
+        const groups = new Map();
+        points.forEach(pt => {
+          const key = coordKey(pt.lat, pt.lon);
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(pt);
+        });
+        groups.forEach(group => {
+          const { lat, lon } = group[0];
+          renderHistoryGroup(lat, lon, group, tid, color, SPURIOUS_COLOR);
         });
       });
 

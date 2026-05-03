@@ -24,6 +24,11 @@ def init_db(app: Flask) -> None:
     schema = (Path(app.root_path) / "schema.sql").read_text()
     with sqlite3.connect(app.config["DB_PATH"]) as conn:
         conn.executescript(schema)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(locations)")}
+        if "spurious" not in cols:
+            conn.execute(
+                "ALTER TABLE locations ADD COLUMN spurious INTEGER NOT NULL DEFAULT 0"
+            )
 
 
 def init_app(app: Flask) -> None:

@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS locations (
     conn    TEXT,
     trigger TEXT,
     raw     TEXT    NOT NULL,
-    received_at INTEGER NOT NULL
+    received_at INTEGER NOT NULL,
+    spurious INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_locations_tst ON locations(tst);

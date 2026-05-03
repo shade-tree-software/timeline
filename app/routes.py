@@ -138,7 +138,10 @@ def points() -> Response:
     frm = _parse_ts(request.args.get("from"))
     to = _parse_ts(request.args.get("to"))
 
-    sql = "SELECT tst, tid, lat, lon, acc, alt, vel, cog, batt FROM locations"
+    sql = (
+        "SELECT id, tst, tid, lat, lon, acc, alt, vel, cog, batt, spurious "
+        "FROM locations"
+    )
     clauses: list[str] = []
     params: list[int] = []
     if frm is not None:
@@ -161,6 +164,7 @@ def points() -> Response:
                 "coordinates": [row["lon"], row["lat"]],
             },
             "properties": {
+                "id": row["id"],
                 "tst": row["tst"],
                 "tid": row["tid"],
                 "acc": row["acc"],
@@ -168,12 +172,33 @@ def points() -> Response:
                 "vel": row["vel"],
                 "cog": row["cog"],
                 "batt": row["batt"],
+                "spurious": bool(row["spurious"]),
             },
         }
         for row in rows
     ]
 
     return jsonify({"type": "FeatureCollection", "features": features})
+
+
+@bp.post("/api/points/<int:point_id>/spurious")
+def set_spurious(point_id: int) -> Response:
+    if (deny := _require_viewer()) is not None:
+        return deny
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("spurious"), bool):
+        return jsonify(error="missing spurious bool"), 400
+
+    db = get_db()
+    cur = db.execute(
+        "UPDATE locations SET spurious = ? WHERE id = ?",
+        (1 if body["spurious"] else 0, point_id),
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        return jsonify(error="not found"), 404
+    return jsonify(id=point_id, spurious=body["spurious"])
 
 
 @bp.get("/api/latest")
@@ -189,7 +214,7 @@ def latest() -> Response:
                 PARTITION BY tid ORDER BY tst DESC, rowid DESC
             ) AS rn
             FROM locations
-            WHERE tid IS NOT NULL
+            WHERE tid IS NOT NULL AND spurious = 0
         )
         WHERE rn = 1
         """
@@ -245,8 +270,16 @@ def api_locations() -> Response:
             return jsonify(error="invalid limit"), 400
         limit = min(limit, max_limit)
 
+    include_spurious = request.args.get("include_spurious", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
     sql = "SELECT tst, lat, lon FROM locations WHERE tid = ?"
     params: list = [tid]
+    if not include_spurious:
+        sql += " AND spurious = 0"
     if frm is not None:
         sql += " AND tst >= ?"
         params.append(frm)

@@ -120,6 +120,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
           crossorigin=""></script>
+  <script src="https://unpkg.com/tz-lookup@6.1.25/tz.js"></script>
   <script>
     const map = L.map('map').setView([0, 0], 2);
     const streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -156,12 +157,20 @@
     let mode = 'day';          // 'day' | 'custom'  (only meaningful when viewMode === 'history')
     let currentDay;            // YYYY-MM-DD (Eastern time) when mode === 'day'
 
-    const tsFmt = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      year: 'numeric', month: 'short', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      timeZoneName: 'short',
-    });
+    function formatTsAt(tst, lat, lon) {
+      let zone;
+      try {
+        zone = tzlookup(lat, lon);
+      } catch (e) {
+        zone = 'UTC';
+      }
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: zone,
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        timeZoneName: 'short',
+      }).format(new Date(tst * 1000));
+    }
 
     function colorForTid(tid) {
       let h = 0;
@@ -279,7 +288,7 @@
       geo.features.forEach(f => {
         const [lon, lat] = f.geometry.coordinates;
         const p = f.properties;
-        const ts = tsFmt.format(new Date(p.tst * 1000));
+        const ts = formatTsAt(p.tst, lat, lon);
         const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
         const velMph = p.vel == null ? '?' : Math.round(p.vel * 0.621371);
         L.circleMarker([lat, lon], { radius: 4, color: 'steelblue' })
@@ -314,7 +323,7 @@
         const p = f.properties;
         const tid = p.tid || '?';
         const color = colorForTid(tid);
-        const ts = tsFmt.format(new Date(p.tst * 1000));
+        const ts = formatTsAt(p.tst, lat, lon);
         const accFt = p.acc == null ? '?' : Math.round(p.acc * 3.28084);
         const battStr = p.batt == null ? '?' : `${p.batt}%`;
         L.circleMarker([lat, lon], {

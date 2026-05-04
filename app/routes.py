@@ -1,6 +1,7 @@
 import base64
 import hmac
 import json
+import math
 import time
 from datetime import datetime, timezone
 
@@ -199,6 +200,63 @@ def set_spurious(point_id: int) -> Response:
     if cur.rowcount == 0:
         return jsonify(error="not found"), 404
     return jsonify(id=point_id, spurious=body["spurious"])
+
+
+@bp.post("/api/points/spurious_radius")
+def set_spurious_radius() -> Response:
+    if (deny := _require_viewer()) is not None:
+        return deny
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error="invalid body"), 400
+    try:
+        lat = float(body["lat"])
+        lon = float(body["lon"])
+        radius_m = float(body.get("radius_m", 5))
+        spurious = bool(body["spurious"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="missing lat/lon/spurious"), 400
+    tid = body.get("tid")
+    if tid is not None and not isinstance(tid, str):
+        return jsonify(error="invalid tid"), 400
+
+    # Bounding-box prefilter, then haversine for precise distance.
+    lat_delta = radius_m / 111000.0
+    lon_delta = radius_m / (111000.0 * max(math.cos(math.radians(lat)), 1e-6))
+
+    db = get_db()
+    sql = (
+        "SELECT id, lat, lon FROM locations "
+        "WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"
+    )
+    params: list = [lat - lat_delta, lat + lat_delta, lon - lon_delta, lon + lon_delta]
+    if tid is not None:
+        sql += " AND tid = ?"
+        params.append(tid)
+    rows = db.execute(sql, params).fetchall()
+
+    phi1 = math.radians(lat)
+    cos_phi1 = math.cos(phi1)
+    ids: list[int] = []
+    for row in rows:
+        phi2 = math.radians(row["lat"])
+        dphi = phi2 - phi1
+        dlam = math.radians(row["lon"] - lon)
+        a = math.sin(dphi / 2) ** 2 + cos_phi1 * math.cos(phi2) * math.sin(dlam / 2) ** 2
+        if 2 * 6371000.0 * math.asin(math.sqrt(a)) <= radius_m:
+            ids.append(row["id"])
+
+    if not ids:
+        return jsonify(count=0)
+
+    placeholders = ",".join("?" * len(ids))
+    db.execute(
+        f"UPDATE locations SET spurious = ? WHERE id IN ({placeholders})",
+        [1 if spurious else 0, *ids],
+    )
+    db.commit()
+    return jsonify(count=len(ids))
 
 
 @bp.get("/api/latest")

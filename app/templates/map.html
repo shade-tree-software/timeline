@@ -84,6 +84,13 @@
       font-size: 12px;
     }
     .spurious-toggle:hover { background: #f0f0f0; }
+    .spurious-radius {
+      margin-top: 6px; padding: 3px 8px; border: 1px solid #ccc;
+      background: white; border-radius: 4px; cursor: pointer; font: inherit;
+      font-size: 12px;
+    }
+    .spurious-radius:hover { background: #f0f0f0; }
+    .spurious-radius:disabled { color: #999; cursor: default; }
     @media (max-width: 480px) {
       #controls { left: 50px; max-width: calc(100vw - 100px); }
       #dateGroup { min-width: 150px; }
@@ -280,6 +287,28 @@
         const countLabel = group.length > 1 ? ` (${group.length} points)` : '';
         header.innerHTML = `<b>${tid}</b>${countLabel}`;
         div.appendChild(header);
+
+        const radiusBtn = document.createElement('button');
+        radiusBtn.className = 'spurious-radius';
+        radiusBtn.textContent = 'Mark all within 5m as spurious';
+        radiusBtn.addEventListener('click', async () => {
+          radiusBtn.disabled = true;
+          const res = await fetch('/api/points/spurious_radius', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat, lon, tid, radius_m: 5, spurious: true }),
+          });
+          if (!res.ok) {
+            radiusBtn.disabled = false;
+            statusEl.textContent = 'Error: ' + res.status;
+            return;
+          }
+          const data = await res.json();
+          statusEl.textContent = `Marked ${data.count} point${data.count === 1 ? '' : 's'} as spurious`;
+          marker.closePopup();
+          load({ fit: false });
+        });
+        div.appendChild(radiusBtn);
 
         group.forEach(({ p }) => {
           const ts = formatTsAt(p.tst, lat, lon);

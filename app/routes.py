@@ -264,17 +264,25 @@ def latest() -> Response:
     if (deny := _require_viewer()) is not None:
         return deny
 
+    # Walk the distinct tids via idx_locations_tid_tst (a skip-scan), then
+    # seek each tid's newest non-spurious row. A window function over the
+    # whole table here was a full scan that grew until uWSGI killed workers.
     rows = get_db().execute(
         """
-        SELECT tst, tid, lat, lon, acc, alt, vel, cog, batt
-        FROM (
-            SELECT *, ROW_NUMBER() OVER (
-                PARTITION BY tid ORDER BY tst DESC, rowid DESC
-            ) AS rn
-            FROM locations
-            WHERE tid IS NOT NULL AND spurious = 0
+        WITH RECURSIVE tids(tid) AS (
+            SELECT MIN(tid) FROM locations
+            UNION ALL
+            SELECT (SELECT MIN(tid) FROM locations WHERE tid > tids.tid)
+            FROM tids WHERE tid IS NOT NULL
         )
-        WHERE rn = 1
+        SELECT l.tst, l.tid, l.lat, l.lon, l.acc, l.alt, l.vel, l.cog, l.batt
+        FROM tids
+        JOIN locations l ON l.id = (
+            SELECT id FROM locations
+            WHERE tid = tids.tid AND spurious = 0
+            ORDER BY tst DESC, id DESC
+            LIMIT 1
+        )
         """
     ).fetchall()
 
